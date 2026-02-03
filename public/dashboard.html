@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Task Queue Dashboard</title>
+  <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #f5f5f5;
+      padding: 20px;
+    }
+    .container { max-width: 1400px; margin: 0 auto; }
+    h1 { margin-bottom: 30px; color: #333; }
+    
+    /* Metrics Cards */
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 20px;
+      margin-bottom: 30px;
+    }
+    .metric-card {
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .metric-value {
+      font-size: 32px;
+      font-weight: bold;
+      margin: 10px 0;
+    }
+    .metric-label {
+      color: #666;
+      font-size: 14px;
+      text-transform: uppercase;
+    }
+    
+    /* Status badges */
+    .status-pending { background: #ffa500; }
+    .status-running { background: #2196f3; }
+    .status-completed { background: #4caf50; }
+    .status-failed { background: #f44336; }
+    
+    /* Jobs Table */
+    .section {
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      margin-bottom: 30px;
+    }
+    .section h2 { margin-bottom: 20px; color: #333; }
+    
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    th, td {
+      padding: 12px;
+      text-align: left;
+      border-bottom: 1px solid #eee;
+    }
+    th {
+      background: #f8f8f8;
+      font-weight: 600;
+      color: #666;
+    }
+    
+    .status-badge {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 12px;
+      color: white;
+      font-size: 12px;
+      font-weight: 500;
+    }
+    
+    .trace-id {
+      font-family: monospace;
+      font-size: 12px;
+      color: #666;
+    }
+    
+    /* Controls */
+    .controls {
+      margin-bottom: 20px;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+    input, button {
+      padding: 10px 15px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 14px;
+    }
+    button {
+      background: #2196f3;
+      color: white;
+      border: none;
+      cursor: pointer;
+    }
+    button:hover { background: #1976d2; }
+    
+    .connected { color: #4caf50; }
+    .disconnected { color: #f44336; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🚀 Task Queue Dashboard</h1>
+    
+    <div class="controls">
+      <input type="text" id="tenantId" placeholder="Enter Tenant ID" value="tenant-demo">
+      <button onclick="connectDashboard()">Connect</button>
+      <span id="connectionStatus" class="disconnected">● Disconnected</span>
+    </div>
+
+    <!-- Metrics -->
+    <div class="metrics">
+      <div class="metric-card">
+        <div class="metric-label">Pending</div>
+        <div class="metric-value" id="metric-pending">0</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Running</div>
+        <div class="metric-value" id="metric-running">0</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Completed</div>
+        <div class="metric-value" id="metric-completed">0</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Failed</div>
+        <div class="metric-value" id="metric-failed">0</div>
+      </div>
+    </div>
+
+    <!-- Jobs Table -->
+    <div class="section">
+      <h2>Recent Jobs</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Job ID</th>
+            <th>Status</th>
+            <th>Trace ID</th>
+            <th>Created</th>
+            <th>Retry Count</th>
+          </tr>
+        </thead>
+        <tbody id="jobsTable">
+          <tr><td colspan="5" style="text-align:center; color:#999;">No jobs yet</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Dead Letter Queue -->
+    <div class="section">
+      <h2>Dead Letter Queue</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Job ID</th>
+            <th>Failed At</th>
+            <th>Error</th>
+            <th>Trace ID</th>
+          </tr>
+        </thead>
+        <tbody id="dlqTable">
+          <tr><td colspan="4" style="text-align:center; color:#999;">No DLQ items</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    let socket;
+    let currentTenantId;
+
+    function connectDashboard() {
+      const tenantId = document.getElementById('tenantId').value;
+      if (!tenantId) {
+        alert('Please enter a tenant ID');
+        return;
+      }
+
+      currentTenantId = tenantId;
+
+      // Connect to WebSocket server
+      socket = io('http://localhost:3000');
+
+      socket.on('connect', () => {
+        console.log('Connected to server');
+        document.getElementById('connectionStatus').textContent = '● Connected';
+        document.getElementById('connectionStatus').className = 'connected';
+        
+        // Subscribe to tenant updates
+        socket.emit('subscribe', tenantId);
+      });
+
+      socket.on('disconnect', () => {
+        document.getElementById('connectionStatus').textContent = '● Disconnected';
+        document.getElementById('connectionStatus').className = 'disconnected';
+      });
+
+      // Receive initial data
+      socket.on('initial_data', (data) => {
+        console.log('Received initial data:', data);
+        updateMetrics(data.metrics);
+        updateJobsTable(data.jobs);
+        updateDLQTable(data.dlqItems);
+      });
+
+      // Receive real-time job updates
+      socket.on('job_update', (update) => {
+        console.log('Job update:', update);
+        fetchAndUpdate();
+      });
+    }
+
+    function updateMetrics(metrics) {
+      document.getElementById('metric-pending').textContent = metrics.pending || 0;
+      document.getElementById('metric-running').textContent = metrics.running || 0;
+      document.getElementById('metric-completed').textContent = metrics.completed || 0;
+      document.getElementById('metric-failed').textContent = metrics.failed || 0;
+    }
+
+    function updateJobsTable(jobs) {
+      const tbody = document.getElementById('jobsTable');
+      
+      if (jobs.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:#999;">No jobs yet</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = jobs.map(job => `
+        <tr>
+          <td><span class="trace-id">${job.id.substring(0, 8)}...</span></td>
+          <td><span class="status-badge status-${job.status}">${job.status.toUpperCase()}</span></td>
+          <td><span class="trace-id">${job.traceId.substring(0, 8)}...</span></td>
+          <td>${new Date(job.createdAt).toLocaleString()}</td>
+          <td>${job.retryCount}</td>
+        </tr>
+      `).join('');
+    }
+
+    function updateDLQTable(dlqItems) {
+      const tbody = document.getElementById('dlqTable');
+      
+      if (dlqItems.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:#999;">No DLQ items</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = dlqItems.map(item => `
+        <tr>
+          <td><span class="trace-id">${item.jobId.substring(0, 8)}...</span></td>
+          <td>${new Date(item.failedAt).toLocaleString()}</td>
+          <td style="max-width: 300px; overflow: hidden; text-overflow: ellipsis;">${item.finalError}</td>
+          <td><span class="trace-id">${item.traceId.substring(0, 8)}...</span></td>
+        </tr>
+      `).join('');
+    }
+
+    async function fetchAndUpdate() {
+      try {
+        const response = await fetch(`http://localhost:3000/api/v1/jobs?tenantId=${currentTenantId}`);
+        const data = await response.json();
+        updateJobsTable(data.jobs);
+        
+        const metricsResponse = await fetch(`http://localhost:3000/api/v1/metrics?tenantId=${currentTenantId}`);
+        const metricsData = await metricsResponse.json();
+        updateMetrics(metricsData.jobs_by_status);
+      } catch (error) {
+        console.error('Failed to fetch updates:', error);
+      }
+    }
+  </script>
+</body>
+</html>

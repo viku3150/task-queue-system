@@ -1,0 +1,54 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// Main jobs table - stores all job information
+model Job {
+  id                String    @id @default(uuid())
+  tenantId          String    @map("tenant_id")
+  status            JobStatus @default(pending)
+  payload           Json
+  idempotencyKey    String?   @unique @map("idempotency_key")
+  retryCount        Int       @default(0) @map("retry_count")
+  maxRetries        Int       @default(3) @map("max_retries")
+  leaseExpiresAt    DateTime? @map("lease_expires_at")
+  workerId          String?   @map("worker_id")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  startedAt         DateTime? @map("started_at")
+  completedAt       DateTime? @map("completed_at")
+  errorMessage      String?   @map("error_message")
+  traceId           String    @map("trace_id")
+  
+  dlqEntry          DLQ?
+  
+  // Indexes for performance
+  @@index([status])
+  @@index([tenantId])
+  @@index([leaseExpiresAt])
+  @@map("jobs")
+}
+
+// Dead Letter Queue - stores failed jobs after max retries
+model DLQ {
+  id           String   @id @default(uuid())
+  jobId        String   @unique @map("job_id")
+  job          Job      @relation(fields: [jobId], references: [id])
+  payload      Json
+  finalError   String   @map("final_error")
+  failedAt     DateTime @default(now()) @map("failed_at")
+  traceId      String   @map("trace_id")
+  
+  @@map("dlq")
+}
+
+enum JobStatus {
+  pending
+  running
+  completed
+  failed
+}

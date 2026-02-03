@@ -1,0 +1,3 @@
+{"event":"job.submitted","jobId":"aeb006c4-9547-4908-9af7-7f781e9d95f7","level":"info","message":"Job submitted","tenantId":"tenant-test","timestamp":"2026-02-03T05:54:53.505Z","traceId":"test-trace-id"}
+{"event":"job.submitted","jobId":"2e114935-5f1b-488c-b9e0-cf675b558d06","level":"info","message":"Job submitted","tenantId":"tenant-test","timestamp":"2026-02-03T05:54:53.512Z","traceId":"test-trace-id"}
+{"idempotencyKey":"test-key-1770098093509","jobId":"2e114935-5f1b-488c-b9e0-cf675b558d06","level":"info","message":"Duplicate job detected, returning existing","timestamp":"2026-02-03T05:54:53.513Z","traceId":"test-trace-id"}
