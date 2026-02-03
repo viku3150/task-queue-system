@@ -94,35 +94,36 @@ export class JobService {
 
 	// Get metrics for dashboard
 	async getMetrics(tenantId?: string) {
-		const where = tenantId ? { tenantId } : {};
+		const whereJob = tenantId ? { tenantId } : {};
 
-		const [total, byStatus, dlqCount, avgProcessingTime] = await Promise.all([
-			this.prisma.job.count({ where }),
+		const [total, byStatus, dlqCount] = await Promise.all([
+			this.prisma.job.count({ where: whereJob }),
 			this.prisma.job.groupBy({
 				by: ["status"],
-				where,
-				_count: true,
+				where: whereJob,
+				_count: { _all: true },
 			}),
-			this.prisma.dLQ.count(),
-			this.prisma.job.aggregate({
-				where: {
-					...where,
-					status: "completed",
-					startedAt: { not: null },
-					completedAt: { not: null },
-				},
-			}),
+			tenantId
+				? this.prisma.dLQ.count({ where: { job: { tenantId } } })
+				: this.prisma.dLQ.count(),
 		]);
+
+		const jobsByStatus: Record<string, number> = {
+			pending: 0,
+			running: 0,
+			completed: 0,
+			failed: 0,
+		};
+
+		for (const row of byStatus) {
+			const count =
+				typeof row._count === "number" ? row._count : row._count._all;
+			jobsByStatus[row.status] = count;
+		}
 
 		return {
 			jobs_total: total,
-			jobs_by_status: byStatus.reduce(
-				(acc, item) => {
-					acc[item.status] = item._count;
-					return acc;
-				},
-				{} as Record<string, number>,
-			),
+			jobs_by_status: jobsByStatus,
 			dlq_size: dlqCount,
 		};
 	}
